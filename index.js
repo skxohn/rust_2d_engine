@@ -1,6 +1,6 @@
 // Import the WASM module
 import('./pkg')
-  .then(wasm => {
+  .then(async wasm => {
     const loadingEl = document.getElementById('loading');
     const canvasEl = document.getElementById('canvas');
 
@@ -17,7 +17,7 @@ import('./pkg')
       // Build random keyframes for this object
       const keyframes = [];
       let t = 0;
-      for (let j = 0; j < 10; j++) {
+      for (let j = 0; j < 1000; j++) {
         t += Math.random() * 5000;
         const x = Math.random() * (width - size);
         const y = Math.random() * (height - size);
@@ -41,7 +41,9 @@ import('./pkg')
     canvasEl.style.display = 'block';
     const hitsEl = document.getElementById('hit-indices');
     hitsEl.style.display = 'block';
-    
+
+    await debug();
+
     // Start the engine loop
     engine.run();
   })
@@ -50,3 +52,29 @@ import('./pkg')
     const loadingEl = document.getElementById('loading');
     loadingEl.textContent = 'Failed to load!';
   });
+
+async function debug() {
+  let lastTime = performance.now();
+
+  function animate() {
+    const currentTime = performance.now();
+    const deltaTime = (currentTime - lastTime) / 1000; // 초 단위로 변환
+    lastTime = currentTime;
+
+    // 메모리 사용량 표시 (디버깅용)
+    displayMemoryUsage();
+
+    requestAnimationFrame(animate);
+  }
+
+  function displayMemoryUsage() {
+    if (window.performance && window.performance.memory) {
+      const memoryInfo = window.performance.memory;
+      const memoryUsed = Math.round(memoryInfo.usedJSHeapSize / (1024 * 1024));
+      const memoryLimit = Math.round(memoryInfo.jsHeapSizeLimit / (1024 * 1024));
+
+      console.log(`Memory: ${memoryUsed}MB / ${memoryLimit}MB`);
+    }
+  }
+  animate();
+}
