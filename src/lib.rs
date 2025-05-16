@@ -3,6 +3,7 @@ mod squre_object;
 mod math;
 mod input;
 mod engine;
+mod lazy_squre_object;
 
 use wasm_bindgen::prelude::*;
 

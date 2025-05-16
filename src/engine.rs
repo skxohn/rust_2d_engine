@@ -5,8 +5,10 @@ use std::{cell::RefCell, rc::Rc};
 //use js_sys::{Array, Promise};
 
 use crate::animation_frame;
+use crate::lazy_squre_object::KeyframeStore;
 use crate::squre_object;
 use crate::input;
+use crate::lazy_squre_object;
 
 #[wasm_bindgen]
 pub struct Rust2DEngine {
@@ -14,6 +16,7 @@ pub struct Rust2DEngine {
     context: CanvasRenderingContext2d,
     last_frame_time: f64,
     objects: Vec<squre_object::SquareObject>,
+    lazy_objects: Vec<lazy_squre_object::LazySquareObject>,
     input_handler: input::InputHandler,
 }
 
@@ -40,6 +43,7 @@ impl Rust2DEngine {
             context,
             last_frame_time,
             objects: Vec::new(),
+            lazy_objects: Vec::new(),
             input_handler,
         })
     }
@@ -56,6 +60,12 @@ impl Rust2DEngine {
                 let now = eng.window.performance().unwrap().now();
                 let delta = now - eng.last_frame_time;
                 eng.last_frame_time = now;
+
+                // let msg = format!(
+                //     "now: {:.3}, delta: {:.2}",
+                //     now, delta
+                // );
+                // web_sys::console::log_1(&msg.into());
 
                 let mouse_pressed = eng.input_handler.is_mouse_button_pressed(0)
                     || eng.input_handler.is_mouse_button_pressed(1)
@@ -94,9 +104,13 @@ impl Rust2DEngine {
         for obj in &mut self.objects {
             obj.update(delta_time);
         }
+
+        for obj in &mut self.lazy_objects {
+            obj.update(delta_time);
+        }
     }
 
-    pub fn render(&self) {
+    pub fn render(&mut self) {
         // 1) Pick a background color
         let bg_color: JsValue = JsValue::from_str("#6C5B7B");
 
@@ -112,12 +126,22 @@ impl Rust2DEngine {
         for obj in &self.objects {
             obj.render(&self.context);
         }
+
+        for obj in &mut self.lazy_objects {
+            let _ = obj.render(&self.context);
+        }
     }
 
     #[wasm_bindgen]
     pub fn add_object(&mut self, keyframes: Vec<squre_object::Keyframe>, size: f64, color: &str) {
         let obj = squre_object::SquareObject::new(keyframes, size, color);
         self.objects.push(obj);
+    }
+
+    #[wasm_bindgen]
+    pub fn add_lazy_object(&mut self, keyframe_store: KeyframeStore, size: f64, color: &str) {
+        let obj = lazy_squre_object::LazySquareObject::new(keyframe_store, size, color);
+        self.lazy_objects.push(obj);
     }
 
     fn get_window_inner_size(window: &Window) -> (u32, u32) {
@@ -141,6 +165,14 @@ impl Rust2DEngine {
     pub fn hit_indices(&self, x: f64, y: f64) -> Vec<u32> {
         let mut hits = Vec::new();
         for obj in &self.objects {
+            let px = obj.current_x();
+            let py = obj.current_y();
+            let s  = obj.get_size();
+            if x >= px && x <= px + s && y >= py && y <= py + s {
+                hits.push(obj.index());
+            }
+        }
+        for obj in &self.lazy_objects {
             let px = obj.current_x();
             let py = obj.current_y();
             let s  = obj.get_size();
