@@ -2,6 +2,9 @@
 name = "rust_2d_engine"
 version = "0.1.0"
 edition = "2021"
+authors = ["Zion Sohn"]
+description = "A simple Rust 2D engine based on canvas and WASM"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
