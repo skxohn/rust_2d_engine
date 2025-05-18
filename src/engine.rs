@@ -1,10 +1,11 @@
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, Window};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::animation_frame;
 use crate::keyframe::Keyframe;
-use crate::keyframe_database::KeyframeDatabase;
+//use crate::keyframe_database::KeyframeDatabase;
 use crate::squre_object;
 use crate::input;
 use crate::squre_object::SquareObject;
@@ -16,7 +17,7 @@ pub struct Rust2DEngine {
     last_frame_time: f64,
     objects: RefCell<Vec<squre_object::SquareObject>>,
     input_handler: input::InputHandler,
-    keyframe_db: Rc<KeyframeDatabase>,
+    //keyframe_db: Rc<KeyframeDatabase>,
 }
 
 #[wasm_bindgen]
@@ -36,12 +37,12 @@ impl Rust2DEngine {
             .dyn_into::<CanvasRenderingContext2d>()?;
         let last_frame_time = window.performance().unwrap().now();
         let input_handler = input::InputHandler::new(&canvas_el)?;
-        let keyframe_db = KeyframeDatabase::new()
-            .await
-            .map_err(|e| {
-                // convert your `idb::Error` into a JsValue
-                JsValue::from_str(&format!("KeyframeDatabase init failed: {}", e))
-            })?;
+        // let keyframe_db = KeyframeDatabase::new()
+        //     .await
+        //     .map_err(|e| {
+        //         // convert your `idb::Error` into a JsValue
+        //         JsValue::from_str(&format!("KeyframeDatabase init failed: {}", e))
+        //     })?;
         //let keyframe_db = Rc::new(db);
 
         Ok(Rust2DEngine {
@@ -50,7 +51,7 @@ impl Rust2DEngine {
             last_frame_time,
             objects: RefCell::new(Vec::new()),
             input_handler,
-            keyframe_db: keyframe_db,
+            //keyframe_db: keyframe_db,
         })
     }
 
@@ -72,8 +73,8 @@ impl Rust2DEngine {
                     || eng.input_handler.is_mouse_button_pressed(2);
 
                 if !mouse_pressed {
-                    eng.update(delta);
-                    eng.render();
+                    eng.update(delta)?;
+                    eng.render()?;
                     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
                         if let Some(el) = doc.get_element_by_id("hit-indices") {
                             el.set_inner_html("None");
@@ -125,23 +126,6 @@ impl Rust2DEngine {
         for obj in objs.iter_mut() {
             obj.render(&self.context)?;
         }
-        Ok(())
-    }
-
-    async fn add_object(
-        &self,
-        keyframes: Vec<Keyframe>,
-        size: f64,
-        color: &str,
-    ) -> Result<(), JsValue> {
-        // let obj = squre_object::SquareObject::new(
-        //     Rc::clone(&self.keyframe_db),
-        //     keyframes,
-        //     size,
-        //     color,
-        // )
-        // .await;
-        // self.objects.push(obj);
         Ok(())
     }
 
@@ -200,6 +184,15 @@ impl Rust2DEngine {
         let rng = js_sys::Math::random;
         
         for idx in 0..total_objects {
+            if idx == 0 || idx % 10 == 0 {
+                let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+                    self.window
+                        .request_animation_frame(&resolve)
+                        .unwrap();
+                });
+                JsFuture::from(promise).await?;
+            }
+            
             // 진행 상황 업데이트
             let progress_ratio = (idx + 1) as f64 / total_objects as f64;
             let percentage = (progress_ratio * 100.0).floor();
@@ -210,7 +203,8 @@ impl Rust2DEngine {
             );
             
             // 로딩 텍스트 업데이트
-            loading_el.set_text_content(Some(&progress_text));
+            //loading_el.set_text_content(Some(&progress_text));
+            loading_el.set_inner_html(&progress_text);
             
             // 콘솔에 진행 상황 출력
             web_sys::console::log_1(&progress_text.into());
@@ -235,73 +229,10 @@ impl Rust2DEngine {
             
             //self.add_object(keyframes, size, &color).await?;
             self.objects.borrow_mut()
-               .push(SquareObject::new(Rc::clone(&self.keyframe_db), keyframes, size, &color).await);
+               //.push(SquareObject::new(Rc::clone(&self.keyframe_db), keyframes, size, &color).await);
+               .push(SquareObject::new(keyframes, size, &color).await);
         }
         
         Ok(())
     }
-
-    // #[wasm_bindgen]
-    // pub async fn generate_objects2(
-    //     &self,
-    //     total_objects: u32,
-    //     frames_per_object: u32,
-    //     size: f64,
-    // ) -> Result<(), JsValue> {
-    //     // 1) Wasm 스레드 풀 초기화
-    //     let _ = init_thread_pool(total_objects as usize);
-
-    //     // 2) 캔버스 크기 가져오기
-    //     let (w, h) = Rust2DEngine::get_window_inner_size(&self.window);
-    //     let width_f  = w as f64;
-    //     let height_f = h as f64;
-
-    //     // 3) js_sys::Math::random을 함수 포인터로 받기
-    //     let rng: fn() -> f64 = js_sys::Math::random;
-
-    //     // 4) Rayon으로 병렬 키프레임·색상 생성
-    //     let params: Vec<(Vec<Keyframe>, f64, String)> = 
-    //         (0..total_objects)
-    //         .into_par_iter()
-    //         .map(|_| {
-    //             // 키프레임 생성
-    //             let mut keyframes = Vec::with_capacity(frames_per_object as usize);
-    //             let mut t = 0.0;
-    //             for _ in 0..frames_per_object {
-    //                 t += rng() * 5000.0;
-    //                 let x = rng() * (width_f - size);
-    //                 let y = rng() * (height_f - size);
-    //                 keyframes.push(Keyframe::new(t, x, y));
-    //             }
-    //             // 랜덤 색상
-    //             let color = format!(
-    //                 "#{:06x}",
-    //                 (rng() * 16777215.0).floor() as u32
-    //             );
-    //             (keyframes, size, color)
-    //         })
-    //         .collect();
-
-    //     // 5) 메인 스레드에서 DOM 요소 가져오기
-    //     let doc        = web_sys::window().unwrap().document().unwrap();
-    //     let loading_el = doc.get_element_by_id("loading").unwrap();
-
-    //     // 6) 순차 업데이트 및 비동기 객체 생성
-    //     for (idx, (keyframes, size, color)) in params.into_iter().enumerate() {
-    //         let done = ((idx as f64 + 1.0) / total_objects as f64 * 100.0).floor() as u32;
-    //         let msg = format!(
-    //             "Creating objects: {} / {} ({}%)",
-    //             idx + 1,
-    //             total_objects,
-    //             done
-    //         );
-    //         loading_el.set_text_content(Some(&msg));
-    //         web_sys::console::log_1(&msg.into());
-
-    //         // 실제 엔진 객체 생성 호출
-    //         self.add_object(keyframes, size, &color).await?;
-    //     }
-
-    //     Ok(())
-    // }
 }

@@ -13,9 +13,9 @@ import('./pkg')
     const width  = canvasEl.width;
     const height = canvasEl.height;
 
-    const totalObjects = 10;
+    const totalObjects = 100;
     const size         = 100;
-    const keyframesPer = 1000;
+    const keyframesPer = 100_000;
     
     const startTime = performance.now();
 
