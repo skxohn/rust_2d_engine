@@ -4,6 +4,9 @@ mod math;
 mod input;
 mod engine;
 mod lazy_squre_object;
+mod keyframe;
+mod keyframe_database;
+mod keyframe_store;
 
 use wasm_bindgen::prelude::*;
 
