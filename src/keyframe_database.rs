@@ -34,7 +34,7 @@ impl KeyframeDatabase {
         Ok(Arc::new(Self { db }))
     }
 
-    pub async fn save_keyframes_sequentially(
+    pub async fn save_chunks(
         &self,
         chunks: Vec<KeyframeChunk>
     ) -> Result<(), Error> {

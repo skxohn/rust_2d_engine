@@ -7,6 +7,7 @@ use std::{cell::RefCell, rc::Rc};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::aabb::AABB;
 use crate::animation_frame;
 use crate::keyframe::Keyframe;
 use crate::keyframe::KeyframeChunk;
@@ -79,11 +80,13 @@ impl Rust2DEngine {
         let engine = Rc::new(RefCell::new(self));
         let task_queue = engine.borrow().task_queue.clone();
 
+        // Initial data fetch
         {
             let engine_clone = engine.clone();
             engine_clone.borrow_mut().fetch_data().await?;
         }
 
+        // Set up periodic data fetching task (every 20ms)
         {
             let task_queue = task_queue.clone();
             let closure = Closure::wrap(Box::new(move || {
@@ -98,6 +101,7 @@ impl Rust2DEngine {
             closure.forget();
         }
 
+        // Setup animation frame loop for update and render
         {
             let engine_clone = engine.clone();
             let task_queue = task_queue.clone();
@@ -117,6 +121,7 @@ impl Rust2DEngine {
             animation_frame::request_recursive(window, f)?;
         }
 
+        // Start the task processing loop
         Self::start_task_loop(engine);
 
         Ok(())
@@ -232,12 +237,12 @@ impl Rust2DEngine {
 
     pub fn hit_indices(&self, x: f64, y: f64) -> Vec<u32> {
         let objs = self.objects.borrow();
+        
         objs.iter()
             .filter_map(|obj| {
-                let px = obj.current_x();
-                let py = obj.current_y();
-                let s  = obj.get_size();
-                if x >= px && x <= px + s && y >= py && y <= py + s {
+                let bbox = AABB::new(obj.current_x(), obj.current_y(), obj.get_size());
+                
+                if bbox.contains_point(x, y) {
                     Some(obj.object_id())
                 } else {
                     None

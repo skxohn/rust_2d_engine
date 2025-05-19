@@ -13,7 +13,7 @@ import('./pkg')
 
     const totalObjects = 1_000;
     const size         = 100;
-    const keyframesPer = 1000_000;
+    const keyframesPer = 100_000;
     
     const startTime = performance.now();
 

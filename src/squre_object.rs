@@ -33,7 +33,7 @@ impl SquareObject {
             .fold(0.0, f32::max);
 
         let _ = keyframe_db
-            .save_keyframes_sequentially(chunks)
+            .save_chunks(chunks)
             .await;
 
         let keyframe_store = KeyframeStore::new(
