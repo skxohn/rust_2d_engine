@@ -30,6 +30,7 @@ pub struct Rust2DEngine {
     window: Rc<Window>,
     window_width: f64,
     window_height: f64,
+    viewport: AABB,
     context: CanvasRenderingContext2d,
     last_frame_time: f64,
     objects: RefCell<Vec<squre_object::SquareObject>>,
@@ -62,10 +63,12 @@ impl Rust2DEngine {
             })?;
         let task_queue = Rc::new(RefCell::new(VecDeque::new()));
         let (width, height) = Rust2DEngine::get_window_inner_size(&window.clone());
+        let viewport = AABB::new (0.0, 0.0, width as f64, height as f64);
         Ok(Rust2DEngine {
             window: Rc::new(window),
             window_width: width.into(),
             window_height: height.into(),
+            viewport: viewport,
             context,
             last_frame_time,
             objects: RefCell::new(Vec::new()),
@@ -86,21 +89,6 @@ impl Rust2DEngine {
             engine_clone.borrow_mut().fetch_data().await?;
         }
 
-        // Set up periodic data fetching task (every 20ms)
-        {
-            let task_queue = task_queue.clone();
-            let closure = Closure::wrap(Box::new(move || {
-                task_queue.borrow_mut().push_back(EngineTask::FetchData);
-            }) as Box<dyn FnMut()>);
-            window().unwrap()
-                .set_interval_with_callback_and_timeout_and_arguments_0(
-                    closure.as_ref().unchecked_ref(),
-                    20,
-                )
-                .unwrap();
-            closure.forget();
-        }
-
         // Setup animation frame loop for update and render
         {
             let engine_clone = engine.clone();
@@ -119,6 +107,21 @@ impl Rust2DEngine {
                 }));
 
             animation_frame::request_recursive(window, f)?;
+        }
+
+        // Set up periodic data fetching task (every 20ms)
+        {
+            let task_queue = task_queue.clone();
+            let closure = Closure::wrap(Box::new(move || {
+                task_queue.borrow_mut().push_back(EngineTask::FetchData);
+            }) as Box<dyn FnMut()>);
+            window().unwrap()
+                .set_interval_with_callback_and_timeout_and_arguments_0(
+                    closure.as_ref().unchecked_ref(),
+                    20,
+                )
+                .unwrap();
+            closure.forget();
         }
 
         // Start the task processing loop
@@ -146,7 +149,6 @@ impl Rust2DEngine {
                             }
                         }
                         EngineTask::UpdateAndRender(delta) => {
-
                             let mouse_pressed = eng.input_handler.is_mouse_button_pressed(0)
                                 || eng.input_handler.is_mouse_button_pressed(1)
                                 || eng.input_handler.is_mouse_button_pressed(2);
@@ -157,11 +159,7 @@ impl Rust2DEngine {
                                 if let Err(e) = eng.render() {
                                     web_sys::console::error_1(&e);
                                 }
-                                if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-                                    if let Some(el) = doc.get_element_by_id("hit-indices") {
-                                        el.set_inner_html("None");
-                                    }
-                                }
+                                Rust2DEngine::update_hit_indices_display("None");
                             } else {
                                 let pos = eng.input_handler.get_mouse_position();
                                 let hits = eng.hit_indices(pos.x, pos.y);
@@ -173,12 +171,10 @@ impl Rust2DEngine {
                                         .collect::<Vec<_>>()
                                         .join(", ")
                                 };
-                                if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-                                    if let Some(el) = doc.get_element_by_id("hit-indices") {
-                                        el.set_inner_html(&hits_str);
-                                    }
-                                }
+                                Rust2DEngine::update_hit_indices_display(&hits_str);
                             }
+                            let fps = if delta > 0.0 { 1000.0 / delta } else { 0.0 };
+                            Rust2DEngine::update_fps_display(fps);
                         }
                     }
                 }
@@ -188,6 +184,21 @@ impl Rust2DEngine {
         });
     }
 
+    pub fn update_hit_indices_display(text: &str) {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.get_element_by_id("hit-indices") {
+                el.set_inner_html(text);
+            }
+        }
+    }
+
+    pub fn update_fps_display(fps: f64) {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.get_element_by_id("fps") {
+                el.set_inner_html(&format!("{:.1} FPS", fps));
+            }
+        }
+    }
 
     async fn fetch_data(&mut self) -> Result<(), JsValue> {
         let mut objs = self.objects.borrow_mut();
@@ -212,6 +223,15 @@ impl Rust2DEngine {
             .fill_rect(0.0, 0.0, self.window_width as f64, self.window_height as f64);
         let objs = self.objects.get_mut();
         for obj in objs.iter_mut() {
+            let bbox = AABB::new(
+                    obj.current_x(), 
+                    obj.current_y(), 
+                    obj.current_x() + obj.get_size(),
+                    obj.current_y() + obj.get_size(),
+                );
+            if !bbox.intersects(&self.viewport) {
+                continue;
+            }
             obj.render(&self.context)?;
         }
         Ok(())
@@ -240,7 +260,12 @@ impl Rust2DEngine {
         
         objs.iter()
             .filter_map(|obj| {
-                let bbox = AABB::new(obj.current_x(), obj.current_y(), obj.get_size());
+                let bbox = AABB::new(
+                    obj.current_x(), 
+                    obj.current_y(), 
+                    obj.current_x() + obj.get_size(),
+                    obj.current_y() + obj.get_size(),
+                );
                 
                 if bbox.contains_point(x, y) {
                     Some(obj.object_id())

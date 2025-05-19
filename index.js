@@ -4,16 +4,18 @@ import('./pkg')
     const loadingEl = document.getElementById('loading');
     const canvasEl  = document.getElementById('canvas');
     const hitsEl    = document.getElementById('hit-indices');
+    const fpsEl     = document.getElementById('fps');
 
     loadingEl.style.display = 'block';
     canvasEl.style.display  = 'none';
     hitsEl.style.display    = 'none';
+    fpsEl.style.display     = 'none';
 
     const engine = await new wasm.Rust2DEngine("canvas");
 
     const totalObjects = 1_000;
     const size         = 100;
-    const keyframesPer = 100_000;
+    const keyframesPer = 1_000;
     
     const startTime = performance.now();
 
@@ -30,8 +32,9 @@ import('./pkg')
         console.log(`Created ${totalObjects} objects with ${keyframesPer} frames each`);
 
         loadingEl.style.display = 'none';
-        canvasEl.style.display = 'block';
-        hitsEl.style.display = 'block';
+        canvasEl.style.display  = 'block';
+        hitsEl.style.display    = 'block';
+        fpsEl.style.display     = 'block';
 
         displayMemoryUsage();
 
