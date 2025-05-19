@@ -1,10 +1,11 @@
 use wasm_bindgen::JsValue;
 use web_sys::CanvasRenderingContext2d;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::rc::Rc;
+use std::sync::Arc;
+//use std::rc::Rc;
 
 use crate::keyframe::Keyframe;
-//use crate::keyframe_store::KeyframeStore;
+use crate::keyframe_store::KeyframeStore;
 use crate::keyframe_database::KeyframeDatabase;
 use crate::math::Vector2;
 
@@ -19,35 +20,36 @@ pub struct SquareObject {
     cached_x: f64,
     cached_y: f64,
     keyframes: Vec<Keyframe>,
-    //keyframe_store: KeyframeStore,
+    keyframe_store: KeyframeStore,
 }
 
 impl SquareObject {
     pub async fn new(
-        keyframe_db: Rc<KeyframeDatabase>,
+        keyframe_db: Arc<KeyframeDatabase>,
         keyframes: Vec<Keyframe>, 
         size: f64, 
         color: &str
     ) -> SquareObject {
 
         let index = NEXT_SQUARE_INDEX.fetch_add(1, Ordering::SeqCst);
-        let chunk_size = 5000.0;
+        //let chunk_size = 5000.0;
+        let chunk_size = 10000.0 + (js_sys::Math::floor(js_sys::Math::random() * 310.0) * 100.0);
 
         let total_duration = keyframes
             .last()
             .expect("keyframes non-empty")
             .time();
 
-        // keyframe_db.clone()
-        //     .save_keyframes_parallel(&index.to_string(), keyframes.clone(), chunk_size)
-        //     .await;
+        let _ = keyframe_db
+            .save_keyframes_sequentially(&index.to_string(), keyframes.clone(), chunk_size)
+            .await;
 
-        // let keyframe_store = KeyframeStore::new(
-        //     &index.to_string(), 
-        //     chunk_size,
-        //     total_duration,
-        //     keyframe_db.into(),
-        // );
+        let keyframe_store = KeyframeStore::new(
+            index.to_string(), 
+            chunk_size,
+            total_duration,
+            keyframe_db.into(),
+        );
         SquareObject {
             index,
             size,
@@ -56,8 +58,8 @@ impl SquareObject {
             total_duration: total_duration,
             cached_x: 0.0,
             cached_y: 0.0,
-            keyframes,
-            //keyframe_store: keyframe_store,
+            keyframes: Vec::new(),
+            keyframe_store: keyframe_store,
         }
     }
 
@@ -103,15 +105,34 @@ impl SquareObject {
         Vector2::new(x, y)
     }
 
+    pub async fn fetch_data(&mut self) -> Result<(), JsValue> {
+        // let msg = "SquareObject::fetch_data";
+        // web_sys::console::log_1(&msg.into());
+        let _ = self.keyframe_store.fetch_data(self.current_time).await;
+        Ok(())
+    }
+
     /// Advance animation by delta_time seconds
     pub fn update(&mut self, delta_time: f64) -> Result<(), JsValue> {
+        // let msg1 = format!("SquareObject::update pre - current_time: {}", self.current_time);
+        // web_sys::console::log_1(&msg1.into());
+
         self.current_time = (self.current_time + delta_time) % self.total_duration;
-        // let pos = self.keyframe_store
-        //     .get_interpolated_position(self.current_time)
-        //     .await?;
-        let pos = self.get_interpolated_position(self.current_time);
-        self.cached_x = pos.x;
-        self.cached_y = pos.y;
+        if let Some(pos) = self.keyframe_store.get_interpolated_position(self.current_time) {
+            self.cached_x = pos.x;
+            self.cached_y = pos.y;
+        }
+
+        // let msg = format!("SquareObject::update - current_time: {}", self.current_time);
+        // web_sys::console::log_1(&msg.into());
+
+        // let frames = &self.keyframes;
+        // let len = frames.len();
+        // if len > 0 {
+        //     let pos = self.get_interpolated_position(self.current_time);
+        //     self.cached_x = pos.x;
+        //     self.cached_y = pos.y;
+        // }
         Ok(())
     }
 

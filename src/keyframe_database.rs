@@ -1,20 +1,21 @@
 use std::collections::HashMap;
-use futures::stream::{FuturesUnordered, StreamExt};
 use idb::{Database, DatabaseEvent, Error, Factory,  KeyPath, ObjectStoreParams, TransactionMode};
-use std::rc::Rc;
+use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
 use crate::keyframe::{Keyframe, KeyframeChunk};
 pub struct KeyframeDatabase {
-    db: Rc<Database>,
+    db: Arc<Database>,
 }
 
 impl KeyframeDatabase {
     /// IndexedDB 연결 생성
-    pub async fn new() -> Result<Rc<Self>, Error> {
+    pub async fn new() -> Result<Arc<Self>, Error> {
         let factory = Factory::new()?;
         let db_name = "keyframe_db";
         let db_version = 1;
+        factory.delete(db_name)?.await?;
+
         let mut open_req = factory.open(db_name, Some(db_version))?;
 
         open_req.on_upgrade_needed(|event| {
@@ -32,56 +33,59 @@ impl KeyframeDatabase {
 
         // open 요청 await 후 Rc로 래핑
         let raw_db: Database = open_req.await?;
-        let db = Rc::new(raw_db);
-        Ok(Rc::new(Self { db }))
+        let db = Arc::new(raw_db);
+        Ok(Arc::new(Self { db }))
     }
 
-    /// 청크를 나눠 병렬 저장 (Rc<Self> 필요)
-    pub async fn save_keyframes_parallel(
-        self: Rc<Self>,
+    pub async fn save_keyframes_sequentially(
+        &self,
         object_id: &str,
         keyframes: Vec<Keyframe>,
         chunk_size: f64,
     ) -> Result<(), Error> {
         let chunks = self.split_into_chunks(object_id, keyframes, chunk_size);
-        let mut tasks = FuturesUnordered::new();
-
+        
+        // 데이터가 없으면 바로 반환
+        if chunks.is_empty() {
+            return Ok(());
+        }
+        
+        // 모든 청크에 대해 하나의 트랜잭션 생성
+        let tx = self.db.transaction(&["keyframe_chunks"], TransactionMode::ReadWrite)?;
+        let store = tx.object_store("keyframe_chunks")?;
+        
+        // 각 청크를 동일한 트랜잭션 내에서 저장
         for chunk in chunks {
-            let db_clone = self.db.clone();
-            let js_val: JsValue = serde_wasm_bindgen::to_value(&chunk).unwrap();
-            tasks.push(async move {
-                let tx = db_clone.transaction(&["keyframe_chunks"], TransactionMode::ReadWrite)?;
-                let store = tx.object_store("keyframe_chunks")?;
-                store.add(&js_val, None)?.await?;
-                tx.commit()?.await?;
-                Ok::<(), Error>(())
-            });
+            let js_val: JsValue = serde_wasm_bindgen::to_value(&chunk)
+                .map_err(|e| Error::AddFailed(JsValue::from_str(&format!("Serialization error: {:?}", e))))?;
+            
+            store.add(&js_val, None)?;
         }
+        
+        // 모든 작업이 완료된 후 트랜잭션 커밋
+        tx.commit()?;
 
-        while let Some(res) = tasks.next().await {
-            res?;
-        }
         Ok(())
     }
 
-    /// 시간 기반으로 키프레임을 청크로 분할
     pub fn split_into_chunks(
         &self,
         object_id: &str,
-        mut keyframes: Vec<Keyframe>,
+        keyframes: Vec<Keyframe>,
         chunk_size: f64,
     ) -> Vec<KeyframeChunk> {
         if keyframes.is_empty() {
             return Vec::new();
         }
-        keyframes.sort_by(|a, b| a.time().partial_cmp(&b.time()).unwrap());
+
         let mut buckets: HashMap<u64, Vec<Keyframe>> = HashMap::new();
         for kf in keyframes {
             let idx = (kf.time() / chunk_size).floor() as u64;
             buckets.entry(idx).or_default().push(kf);
         }
-        let mut chunks: Vec<KeyframeChunk> = buckets.into_iter().map(|(idx, mut kfs)| {
-            kfs.sort_by(|a, b| a.time().partial_cmp(&b.time()).unwrap());
+
+        let mut chunks = Vec::with_capacity(buckets.len());
+        for (idx, kfs) in buckets {
             let mut chunk = KeyframeChunk::new(
                 &format!("{}_{}", object_id, idx),
                 idx as f64 * chunk_size,
@@ -90,30 +94,40 @@ impl KeyframeDatabase {
             for kf in kfs {
                 chunk.add_keyframe(kf.time(), kf.x(), kf.y());
             }
-            chunk
-        }).collect();
-        chunks.sort_by(|a, b| a.start_time().partial_cmp(&b.start_time()).unwrap());
+            chunks.push(chunk);
+        }
+
         chunks
     }
 
-    /// 특정 청크 로드
     pub async fn load_chunk(
         &self,
         object_id: &str,
         chunk_id: u32,
-    ) -> Result<Option<KeyframeChunk>, Error> {
+    ) -> Result<KeyframeChunk, Error> {
         let key_str = format!("{}_{}", object_id, chunk_id);
         let js_key = JsValue::from_str(&key_str);
+
+        // Start readonly transaction
         let tx = self.db.transaction(&["keyframe_chunks"], TransactionMode::ReadOnly)?;
         let store = tx.object_store("keyframe_chunks")?;
         let req = store.get(js_key)?;
+
+        // Await the request
         let maybe = req.await?;
-        tx.commit()?.await?;
+        
+        // No need to explicitly commit a readonly transaction
+        // It will automatically commit when all operations are complete
+
+        // Deserialize if present, else return an error
         if let Some(js_val) = maybe {
             let chunk: KeyframeChunk = serde_wasm_bindgen::from_value(js_val).unwrap();
-            Ok(Some(chunk))
+            //chunk.log_contents();
+            Ok(chunk)
         } else {
-            Ok(None)
+            Err(Error::AddFailed(JsValue::from_str(
+                &format!("No chunk found for key '{}'", key_str),
+            )))
         }
     }
 }

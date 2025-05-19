@@ -10,12 +10,10 @@ import('./pkg')
     hitsEl.style.display    = 'none';
 
     const engine = await new wasm.Rust2DEngine("canvas");
-    const width  = canvasEl.width;
-    const height = canvasEl.height;
 
     const totalObjects = 100;
     const size         = 100;
-    const keyframesPer = 100_000;
+    const keyframesPer = 1_000;
     
     const startTime = performance.now();
 
