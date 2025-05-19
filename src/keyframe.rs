@@ -43,26 +43,7 @@ impl KeyframeChunk {
         }
     }
 
-    fn sort_keyframes(&mut self) {
-        self.keyframes
-            .sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
-    }
-
-    pub fn start_time(&self) -> f64 { self.start_time }
-
-    pub fn end_time(&self) -> f64 { self.end_time }
-
-    pub fn keyframes(&self) -> Vec<Keyframe> { self.keyframes.clone() }
-
-    pub fn object_chunk_id(&self) -> String { self.object_chunk_id.clone() }
-
     pub fn interpolate(&self, time: f64) -> Vector2 {
-
-        // web_sys::console::log_1(
-        //     &format!("KeyframeChunk:interpolate() time = {:.2}, keyframes.len() = {}", time, self.keyframes.len()).into(),
-        // );
-        // self.log_contents();
-        // If no keyframes, return zero vector
         if self.keyframes.is_empty() {
             return Vector2::new(0.0, 0.0);
         }
@@ -81,10 +62,6 @@ impl KeyframeChunk {
             let k = &self.keyframes[0];
             return Vector2::new(k.x(), k.y());
         }
-
-        // web_sys::console::log_1(
-        //     &format!("KeyframeChunk:interpolate() ------", ).into(),
-        // );
 
         // Find surrounding keyframes
         let mut prev = &self.keyframes[0];
@@ -106,10 +83,6 @@ impl KeyframeChunk {
 
         // If time is after the last keyframe, return last position
         let last = self.keyframes.last().unwrap();
-
-        // web_sys::console::log_1(
-        //     &format!("KeyframeChunk:interpolate() x = {:.2}, y = {:.2}", last.x(), last.y()).into(),
-        // );
         Vector2::new(last.x(), last.y())
     }
 
