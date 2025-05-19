@@ -1,18 +1,13 @@
 use wasm_bindgen::JsValue;
 use web_sys::CanvasRenderingContext2d;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-//use std::rc::Rc;
 
-use crate::keyframe::Keyframe;
+use crate::keyframe::{KeyframeChunk};
 use crate::keyframe_store::KeyframeStore;
 use crate::keyframe_database::KeyframeDatabase;
-use crate::math::Vector2;
-
-static NEXT_SQUARE_INDEX: AtomicU32 = AtomicU32::new(0);
 
 pub struct SquareObject {
-    index: u32,
+    object_id: u32,
     size: f64,
     color: String,
     current_time: f64,
@@ -24,36 +19,35 @@ pub struct SquareObject {
 
 impl SquareObject {
     pub async fn new(
-        keyframe_db: Arc<KeyframeDatabase>,
-        keyframes: Vec<Keyframe>, 
+        object_id: u32,
         size: f64, 
-        color: &str
+        color: &str,
+        chunks: Vec<KeyframeChunk>,
+        chunk_size: f32,
+        keyframe_db: Arc<KeyframeDatabase>,
     ) -> SquareObject {
 
-        let index = NEXT_SQUARE_INDEX.fetch_add(1, Ordering::SeqCst);
-        let chunk_size = 10000.0 + (js_sys::Math::floor(js_sys::Math::random() * 310.0) * 100.0);
-
-        let total_duration = keyframes
-            .last()
-            .expect("keyframes non-empty")
-            .time();
+        let total_duration = chunks
+            .iter()
+            .map(|chunk| chunk.end_time())
+            .fold(0.0, f32::max);
 
         let _ = keyframe_db
-            .save_keyframes_sequentially(&index.to_string(), keyframes.clone(), chunk_size)
+            .save_keyframes_sequentially(chunks)
             .await;
 
         let keyframe_store = KeyframeStore::new(
-            index.to_string(), 
+            object_id.to_string(), 
             chunk_size,
-            total_duration,
+            total_duration.into(),
             keyframe_db.into(),
         );
         SquareObject {
-            index,
+            object_id,
             size,
             color: color.to_string(),
             current_time: 0.0,
-            total_duration: total_duration,
+            total_duration: total_duration.into(),
             cached_x: 0.0,
             cached_y: 0.0,
             keyframe_store: keyframe_store,
@@ -61,8 +55,8 @@ impl SquareObject {
     }
 
     /// Unique index for this square
-    pub fn index(&self) -> u32 {
-        self.index
+    pub fn object_id(&self) -> u32 {
+        self.object_id
     }
 
     pub async fn fetch_data(&mut self) -> Result<(), JsValue> {
@@ -87,9 +81,9 @@ impl SquareObject {
         Ok(())
     }
 
-    pub fn reset(&mut self) {
-        self.current_time = 0.0;
-    }
+    // pub fn reset(&mut self) {
+    //     self.current_time = 0.0;
+    // }
 
     pub fn current_x(&self) -> f64 {
         self.cached_x

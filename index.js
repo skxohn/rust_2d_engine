@@ -11,9 +11,9 @@ import('./pkg')
 
     const engine = await new wasm.Rust2DEngine("canvas");
 
-    const totalObjects = 100;
+    const totalObjects = 1_000;
     const size         = 100;
-    const keyframesPer = 1_000;
+    const keyframesPer = 1000_000;
     
     const startTime = performance.now();
 
@@ -25,7 +25,7 @@ import('./pkg')
         );
         
         const endTime = performance.now();
-        const timeElapsed = (endTime - startTime) / 1000; // 초 단위로 변환
+        const timeElapsed = (endTime - startTime) / 1000;
         console.log(`Total initialization time: ${timeElapsed.toFixed(2)} seconds`);
         console.log(`Created ${totalObjects} objects with ${keyframesPer} frames each`);
 

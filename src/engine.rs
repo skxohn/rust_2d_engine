@@ -5,15 +5,19 @@ use web_sys::window;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, Window};
 use std::{cell::RefCell, rc::Rc};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::animation_frame;
 use crate::keyframe::Keyframe;
+use crate::keyframe::KeyframeChunk;
 use crate::keyframe_database::KeyframeDatabase;
 use crate::squre_object;
 use crate::input;
 use crate::squre_object::SquareObject;
 
 use std::collections::VecDeque;
+
+static NEXT_SQUARE_INDEX: AtomicU32 = AtomicU32::new(0);
 
 enum EngineTask {
     FetchData,
@@ -23,6 +27,8 @@ enum EngineTask {
 #[wasm_bindgen]
 pub struct Rust2DEngine {
     window: Rc<Window>,
+    window_width: f64,
+    window_height: f64,
     context: CanvasRenderingContext2d,
     last_frame_time: f64,
     objects: RefCell<Vec<squre_object::SquareObject>>,
@@ -51,12 +57,14 @@ impl Rust2DEngine {
         let keyframe_db = KeyframeDatabase::new()
             .await
             .map_err(|e| {
-                // convert your `idb::Error` into a JsValue
                 JsValue::from_str(&format!("KeyframeDatabase init failed: {}", e))
             })?;
         let task_queue = Rc::new(RefCell::new(VecDeque::new()));
+        let (width, height) = Rust2DEngine::get_window_inner_size(&window.clone());
         Ok(Rust2DEngine {
             window: Rc::new(window),
+            window_width: width.into(),
+            window_height: height.into(),
             context,
             last_frame_time,
             objects: RefCell::new(Vec::new()),
@@ -76,7 +84,6 @@ impl Rust2DEngine {
             engine_clone.borrow_mut().fetch_data().await?;
         }
 
-        // fetch 루프
         {
             let task_queue = task_queue.clone();
             let closure = Closure::wrap(Box::new(move || {
@@ -91,7 +98,6 @@ impl Rust2DEngine {
             closure.forget();
         }
 
-        // render 루프
         {
             let engine_clone = engine.clone();
             let task_queue = task_queue.clone();
@@ -111,7 +117,6 @@ impl Rust2DEngine {
             animation_frame::request_recursive(window, f)?;
         }
 
-        // 루프 실행 시작
         Self::start_task_loop(engine);
 
         Ok(())
@@ -173,7 +178,6 @@ impl Rust2DEngine {
                     }
                 }
 
-                // 작은 delay로 CPU 과점 방지
                 gloo_timers::future::TimeoutFuture::new(1).await;
             }
         });
@@ -197,18 +201,10 @@ impl Rust2DEngine {
     }
 
     fn render(&mut self) -> Result<(), JsValue> {
-        // 1) Pick a background color
-        let bg_color: JsValue = JsValue::from_str("#6C5B7B");
-
-        // 2) Get the current window size
-        let (width, height) = Rust2DEngine::get_window_inner_size(&self.window);
-
-        // 3) Clear the entire canvas
+        let bg_color = JsValue::from_str("#6C5B7B");
         self.context.set_fill_style(&bg_color);
         self.context
-            .fill_rect(0.0, 0.0, width as f64, height as f64);
-
-        // 4) Draw every object
+            .fill_rect(0.0, 0.0, self.window_width as f64, self.window_height as f64);
         let objs = self.objects.get_mut();
         for obj in objs.iter_mut() {
             obj.render(&self.context)?;
@@ -242,7 +238,7 @@ impl Rust2DEngine {
                 let py = obj.current_y();
                 let s  = obj.get_size();
                 if x >= px && x <= px + s && y >= py && y <= py + s {
-                    Some(obj.index())
+                    Some(obj.object_id())
                 } else {
                     None
                 }
@@ -257,22 +253,18 @@ impl Rust2DEngine {
         frames_per_object: u32,
         size: f64,
     ) -> Result<(), JsValue> {
-        // 캔버스 크기 가져오기
         let (width, height) = Rust2DEngine::get_window_inner_size(&self.window);
-        let width_f64 = width as f64;
-        let height_f64 = height as f64;
+        let width_f32 = width as f32;
+        let height_f32 = height as f32;
+        let size_f32 = size as f32;
 
-        // 진행 상황을 JavaScript로 보내기 위한 콜백 설정
         let window = web_sys::window().unwrap();
         let document = window.document().unwrap();
         let loading_el = document.get_element_by_id("loading").unwrap();
 
-        // 난수 생성기
         let rng = js_sys::Math::random;
 
         for idx in 0..total_objects {
-            // 애니메이션 프레임 동기화
-            //if idx == 0 || idx % 10 == 0 
             {
                 let promise = js_sys::Promise::new(&mut |resolve, _reject| {
                     self.window
@@ -282,59 +274,77 @@ impl Rust2DEngine {
                 JsFuture::from(promise).await?;
             }
 
-            // 진행 상황 업데이트
-            let progress_ratio = (idx + 1) as f64 / total_objects as f64;
-            let percentage = (progress_ratio * 100.0).floor();
-
+            let progress_ratio = (idx + 1) as f32 / total_objects as f32;
+            let percentage = progress_ratio * 100.0;
             let progress_text = format!(
-                "Creating objects: {} / {} ({}%)",
+                "Creating objects: {} / {} ({:.1}%)",
                 idx + 1,
                 total_objects,
                 percentage
             );
 
-            // 로딩 텍스트 업데이트
             loading_el.set_inner_html(&progress_text);
 
-            // 콘솔 출력
-            //web_sys::console::log_1(&progress_text.into());
+            let object_id = NEXT_SQUARE_INDEX.fetch_add(1, Ordering::SeqCst);
+            let chunk_size = 10_000.0 + (rng() as f32 * 310.0).floor() * 100.0;
 
-            // 랜덤 색상 생성
             let color = format!("#{:06x}", (rng() * 0xFFFFFF as f64).floor() as u32);
+            let mut chunks: Vec<KeyframeChunk> = Vec::new();
 
-            // 키프레임 생성
-            let mut keyframes = Vec::new();
-            let mut t = 0.0;
+            let mut current_chunk: Vec<Keyframe> = Vec::new();
+            let mut current_start_time = 0.0f32;
 
-            let x0 = rng() * (width_f64 - size);
-            let y0 = rng() * (height_f64 - size);
-            // web_sys::console::log_1(
-            //     &format!("Keyframe: time = {:.2}, x = {:.2}, y = {:.2}", t, x0, y0).into(),
-            // );
-            keyframes.push(Keyframe::new(t, x0, y0));
+            let mut t = 0.0f32;
+            let x0 = rng() as f32 * (width_f32 - size_f32);
+            let y0 = rng() as f32 * (height_f32 - size_f32);
+            current_chunk.push(Keyframe::new(t, x0, y0));
 
-            for _ in 1..frames_per_object {
-                t += rng() * 1000.0;
-                let x = rng() * (width_f64 - size);
-                let y = rng() * (height_f64 - size);
+            for _ in 0..frames_per_object {
+                t += rng() as f32 * 1000.0;
+                let x = rng() as f32 * (width_f32 - size_f32);
+                let y = rng() as f32 * (height_f32 - size_f32);
+                let keyframe = Keyframe::new(t, x, y);
 
-                // let log_msg = format!("Keyframe: time = {:.2}, x = {:.2}, y = {:.2}", t, x, y);
-                // web_sys::console::log_1(&log_msg.into());
+                if t >= current_start_time + chunk_size {
+                    let chunk = KeyframeChunk::new(
+                        &format!("{}_{}", object_id, (current_start_time / chunk_size).floor() as u32),
+                        current_chunk.first().unwrap().time(),
+                        current_chunk.last().unwrap().time(),
+                        current_chunk,
+                    );
+                    chunks.push(chunk);
 
-                keyframes.push(Keyframe::new(t, x, y));
+                    current_chunk = Vec::new();
+                    current_start_time += chunk_size;
+                }
+
+                current_chunk.push(keyframe);
             }
 
-            // 오브젝트 추가
-            self.objects
-                .borrow_mut()
-                .push(SquareObject::new(Arc::clone(&self.keyframe_db), keyframes, size, &color).await);
+            if !current_chunk.is_empty() {
+                let chunk = KeyframeChunk::new(
+                    &format!("{}_{}", object_id, (current_start_time / chunk_size).floor() as u32),
+                    current_chunk.first().unwrap().time(),
+                    current_chunk.last().unwrap().time(),
+                    current_chunk,
+                );
+                chunks.push(chunk);
+            }
+
+            let square = SquareObject::new(
+                object_id,
+                size,
+                &color,
+                chunks,
+                chunk_size,
+                Arc::clone(&self.keyframe_db)
+            ).await;
+
+            self.objects.borrow_mut().push(square);
         }
 
-        // 🎯 Preprocessing 메시지 출력
         loading_el.set_inner_html("Preprocessing...");
-        //web_sys::console::log_1(&"Preprocessing...".into());
 
-        // 📦 fetch_data 호출 (모든 오브젝트에 대해)
         let engine = Rc::new(RefCell::new(self));
         {
             let engine_clone = engine.clone();
@@ -343,4 +353,5 @@ impl Rust2DEngine {
 
         Ok(())
     }
+
 }
