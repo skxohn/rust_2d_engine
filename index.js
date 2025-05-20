@@ -13,9 +13,9 @@ import('./pkg')
 
     const engine = await new wasm.Rust2DEngine("canvas");
 
-    const totalObjects = 1_000;
+    const totalObjects = 100;
     const size         = 100;
-    const keyframesPer = 1_000;
+    const keyframesPer = 1_000_000;
     
     const startTime = performance.now();
 

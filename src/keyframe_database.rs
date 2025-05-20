@@ -42,7 +42,7 @@ impl KeyframeDatabase {
             return Ok(());
         }
 
-        const BATCH_SIZE: usize = 1_000;
+        const BATCH_SIZE: usize = 200;
 
         for chunk_batch in chunks.chunks(BATCH_SIZE) {
             let tx = self.db.transaction(&["keyframe_chunks"], TransactionMode::ReadWrite)?;
@@ -52,10 +52,13 @@ impl KeyframeDatabase {
                 let js_val: JsValue = serde_wasm_bindgen::to_value(chunk)
                     .map_err(|e| Error::AddFailed(JsValue::from_str(&format!("Serialization error: {:?}", e))))?;
 
-                store.add(&js_val, None)?;
+                let req = store.put(&js_val, None)?;
+                req.await?;
             }
 
             tx.commit()?;
+
+            gloo_timers::future::TimeoutFuture::new(0).await;
         }
 
         Ok(())
